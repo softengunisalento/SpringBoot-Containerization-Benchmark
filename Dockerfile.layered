@@ -1,0 +1,59 @@
+# =================================================================
+# Configurazione B: Layered JAR con Cache Ottimizzato
+# Ottimizzazione per rebuild frequenti e cache efficace
+# =================================================================
+
+# Stage 1: Build con cache mount per dipendenze Maven
+FROM maven:3.9-eclipse-temurin-21-alpine AS builder
+
+WORKDIR /build
+
+# Copia solo pom.xml per sfruttare cache layer
+COPY pom.xml .
+
+# Download dipendenze con cache mount (BuildKit feature)
+# La cache persiste tra build successive
+RUN --mount=type=cache,target=/root/.m2,id=maven-cache,sharing=shared \
+    mvn dependency:go-offline -B
+
+# Copia sorgenti
+COPY src ./src
+
+# Build con cache mount per evitare re-download dipendenze
+RUN --mount=type=cache,target=/root/.m2,id=maven-cache,sharing=shared \
+    mvn clean package -DskipTests -B
+
+# Estrai layer dal JAR per separazione ottimale
+WORKDIR /build/target
+RUN java -Djarmode=layertools -jar *.jar extract
+
+# Stage 2: Runtime con layer separati
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+
+# Copia layer in ordine di frequenza di modifica (dal meno al più frequente)
+# Layer 1: Dipendenze (cambiano raramente)
+COPY --from=builder /build/target/dependencies/ ./
+
+# Layer 2: Spring Boot Loader (quasi mai cambia)
+COPY --from=builder /build/target/spring-boot-loader/ ./
+
+# Layer 3: Snapshot dependencies (cambiano occasionalmente)
+COPY --from=builder /build/target/snapshot-dependencies/ ./
+
+# Layer 4: Codice applicazione (cambia frequentemente)
+COPY --from=builder /build/target/application/ ./
+
+# Configurazione JVM identica a Config A
+ENV JAVA_OPTS="-Xms256m \
+               -Xmx512m \
+               -XX:+UseContainerSupport \
+               -XX:+UseG1GC \
+               -XX:MaxGCPauseMillis=100 \
+               -Djava.security.egd=file:/dev/./urandom"
+
+EXPOSE 8080
+
+# Usa JarLauncher per caricare layer
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS org.springframework.boot.loader.launch.JarLauncher"]

@@ -1,0 +1,19 @@
+{
+  "resources": {
+    "includes": [
+      {
+        "pattern": "\\QMeta-INF/services/org.jboss.logging.LoggerProvider\\E"
+      },
+      {
+        "pattern": "\\QMETA-INF/services/org.jboss.logging.LoggerProvider\\E"
+      },
+      {
+        "pattern": "org/hibernate/.*"
+      },
+      {
+        "pattern": "application.properties"
+      }
+    ]
+  }
+}
+

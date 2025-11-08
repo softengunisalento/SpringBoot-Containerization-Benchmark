@@ -1,0 +1,30 @@
+# =================================================================
+# Configurazione A: Fat JAR Tradizionale
+# Baseline di riferimento per confronti energetici
+# =================================================================
+
+# Stage 1: Build
+FROM maven:3.9-eclipse-temurin-21-alpine AS builder
+
+WORKDIR /build
+
+# Copia file di configurazione Maven
+COPY pom.xml .
+COPY src ./src
+
+# Build del JAR (fat jar tradizionale, senza layering)
+RUN mvn clean package -DskipTests
+
+# Stage 2: Runtime
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+
+# Copia JAR dal builder
+COPY --from=builder /build/target/*.jar app.jar
+
+# Esponi porta applicazione
+EXPOSE 8080
+
+# Entrypoint
+ENTRYPOINT ["sh", "-c", "exec java -jar app.jar"]
