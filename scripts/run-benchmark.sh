@@ -197,6 +197,9 @@ extract_peak_energy() {
     echo "${energy:-0}"
 }
 
+# Nome del container postgres per il benchmark
+POSTGRES_CONTAINER_NAME="tesi-benchmark-postgres"
+
 # Funzione per cleanup container
 cleanup_container() {
     local container_name=$1
@@ -207,6 +210,86 @@ cleanup_container() {
         docker rm "${container_name}" &> /dev/null || true
     fi
 }
+
+# Funzione per cleanup completo di tutti i container del benchmark
+cleanup_all_containers() {
+    log "Pulizia di tutti i container del benchmark..."
+
+    # Ferma e rimuovi container di test
+    for config in "${CONFIGS[@]}"; do
+        cleanup_container "${IMAGE_PREFIX}-${config}-startup"
+        cleanup_container "${IMAGE_PREFIX}-${config}-idle"
+        cleanup_container "${IMAGE_PREFIX}-${config}-load"
+    done
+
+    # Ferma e rimuovi postgres
+    cleanup_container "${POSTGRES_CONTAINER_NAME}"
+
+    log_success "Tutti i container sono stati rimossi"
+
+    # Rimuovi le immagini create durante il benchmark
+    log "Rimozione immagini Docker del benchmark..."
+    for config in "${CONFIGS[@]}"; do
+        local image_name="${IMAGE_PREFIX}-${config}"
+        if docker images -q "${image_name}" 2> /dev/null | grep -q .; then
+            log "Rimuovo immagine ${image_name}..."
+            docker rmi "${image_name}" &> /dev/null || true
+        fi
+    done
+
+    log_success "Tutte le immagini sono state rimosse"
+}
+
+# Funzione per avviare postgres per il benchmark
+start_postgres() {
+    log "Avvio database PostgreSQL per il benchmark..."
+
+    # Rimuovi eventuali container postgres precedenti
+    cleanup_container "${POSTGRES_CONTAINER_NAME}"
+
+    # Avvia postgres con rimozione automatica
+    docker run -d --rm \
+        --name "${POSTGRES_CONTAINER_NAME}" \
+        -e POSTGRES_DB=testdb \
+        -e POSTGRES_USER=postgres \
+        -e POSTGRES_PASSWORD=postgres \
+        -p 5436:5432 \
+        postgres:15-alpine > /dev/null
+
+    log "Attendo che PostgreSQL sia pronto..."
+    local max_attempts=30
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        if docker exec "${POSTGRES_CONTAINER_NAME}" pg_isready -U postgres &> /dev/null; then
+            log_success "PostgreSQL pronto"
+            break
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    if [ $attempt -eq $max_attempts ]; then
+        log_error "PostgreSQL non si è avviato in tempo"
+        return 1
+    fi
+
+    # Crea il database tesidb se non esiste
+    log "Verifico database tesidb..."
+    docker exec "${POSTGRES_CONTAINER_NAME}" psql -U postgres -d testdb -tc "SELECT 1 FROM pg_database WHERE datname = 'tesidb'" | grep -q 1
+
+    if [ $? -ne 0 ]; then
+        docker exec "${POSTGRES_CONTAINER_NAME}" psql -U postgres -d testdb -c "CREATE DATABASE tesidb;" > /dev/null
+        log_success "Database tesidb creato"
+    else
+        log_success "Database tesidb già presente"
+    fi
+
+    return 0
+}
+
+# Trap per cleanup automatico in caso di interruzione o errore
+trap cleanup_all_containers EXIT INT TERM
 
 # Funzione per attendere che l'app sia pronta
 wait_for_app() {
@@ -732,7 +815,11 @@ main() {
     # Verifica dipendenze
     check_dependencies
 
-    docker start postgres5436
+    # Avvia database PostgreSQL
+    start_postgres || {
+        log_error "Impossibile avviare PostgreSQL"
+        exit 1
+    }
 
     # Loop su tutte le configurazioni
     for config in "${CONFIGS[@]}"; do
