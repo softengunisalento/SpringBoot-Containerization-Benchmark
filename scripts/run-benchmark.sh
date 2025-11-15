@@ -21,8 +21,8 @@ RESULTS_FILE="${RESULTS_DIR}/results.txt"
 CSV_FILE="${RESULTS_DIR}/results.csv"
 
 # Configurazioni Docker
-#CONFIGS=("fatjar" "layered" "native")
-CONFIGS=("fatjar" "layered")
+CONFIGS=("fatjar" "layered" "native")
+#CONFIGS=("fatjar" "layered")
 IMAGE_PREFIX="tesi-benchmark"
 
 # Parametri test
@@ -210,12 +210,22 @@ cleanup_container() {
 
 # Funzione per attendere che l'app sia pronta
 wait_for_app() {
+    local container_name=$1
     local max_attempts=60
     local attempt=0
 
     log "Attendo avvio applicazione..."
 
     while [ $attempt -lt $max_attempts ]; do
+        # Verifica se il container è ancora in esecuzione
+        if ! docker ps --filter "name=${container_name}" --filter "status=running" --format '{{.Names}}' | grep -q "^${container_name}$"; then
+            log_error "Container ${container_name} non è più in esecuzione!"
+            log "Ultimi log del container:"
+            docker logs --tail 50 "${container_name}" 2>&1 | tee -a "${RESULTS_FILE}"
+            return 1
+        fi
+
+        # Verifica se l'applicazione risponde
         if curl -s "${HEALTH_URL}" &> /dev/null || \
            curl -s "${APP_URL}" &> /dev/null || \
            curl -s "${API_URL}" &> /dev/null; then
@@ -228,10 +238,14 @@ wait_for_app() {
 
         if [ $((attempt % 10)) -eq 0 ]; then
             log "Tentativo ${attempt}/${max_attempts}..."
+            # Mostra uno snippet dei log per debugging
+            docker logs --tail 5 "${container_name}" 2>&1 | head -3
         fi
     done
 
     log_error "Timeout in attesa dell'applicazione"
+    log "Log completi del container:"
+    docker logs "${container_name}" 2>&1 | tail -100 | tee -a "${RESULTS_FILE}"
     return 1
 }
 
@@ -473,8 +487,8 @@ test_startup() {
 
     local start_time=$(date +%s.%N)
 
-    # Avvia container in background
-    docker run -d --name "${container_name}" -p 8080:8080 "${image_name}" > /dev/null
+    # Avvia container in background con network host per accedere al database sull'host
+    docker run -d --name "${container_name}" --network host "${image_name}" > /dev/null
 
     # Crea file marker per il loop perf
     touch "${perf_file}.monitor"
@@ -495,7 +509,7 @@ test_startup() {
     local perf_monitor_pid=$!
 
     # Attendi che l'app sia pronta
-    if ! wait_for_app; then
+    if ! wait_for_app "${container_name}"; then
         log_error "Startup fallito per ${config}"
         docker logs "${container_name}"
         rm -f "${perf_file}.monitor"
@@ -557,9 +571,9 @@ test_idle() {
     cleanup_container "${container_name}"
 
     log "Avvio container..."
-    docker run -d --name "${container_name}" -p 8080:8080 "${image_name}" > /dev/null
+    docker run -d --name "${container_name}" --network host "${image_name}" > /dev/null
 
-    if ! wait_for_app; then
+    if ! wait_for_app "${container_name}"; then
         log_error "Startup fallito per ${config}"
         cleanup_container "${container_name}"
         return 1
@@ -624,9 +638,9 @@ test_load() {
     cleanup_container "${container_name}"
 
     log "Avvio container..."
-    docker run -d --name "${container_name}" -p 8080:8080 "${image_name}" > /dev/null
+    docker run -d --name "${container_name}" --network host "${image_name}" > /dev/null
 
-    if ! wait_for_app; then
+    if ! wait_for_app "${container_name}"; then
         log_error "Startup fallito per ${config}"
         cleanup_container "${container_name}"
         return 1
