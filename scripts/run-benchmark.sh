@@ -21,8 +21,9 @@ RESULTS_FILE="${RESULTS_DIR}/results.txt"
 CSV_FILE="${RESULTS_DIR}/results.csv"
 
 # Configurazioni Docker
-CONFIGS=("fatjar" "layered" "native")
+#CONFIGS=("fatjar" "layered" "native")
 #CONFIGS=("fatjar" "layered")
+CONFIGS=("layered")
 IMAGE_PREFIX="tesi-benchmark"
 
 # Parametri test
@@ -470,6 +471,16 @@ test_build() {
     local perf_file="${RESULTS_DIR}/perf_build_${config}.txt"
     local build_log="${RESULTS_DIR}/build_${config}.log"
 
+    # Determina se usare BuildKit in base alla configurazione
+    local use_buildkit=""
+    if [[ "${config}" == "layered" || "${config}" == "native" ]]; then
+        use_buildkit="DOCKER_BUILDKIT=1"
+        log "BuildKit ABILITATO per ${config} (usa mount cache)"
+    else
+        use_buildkit="DOCKER_BUILDKIT=0"
+        log "BuildKit DISABILITATO per ${config} (non usa mount cache)"
+    fi
+
     # Pulizia pre-build
     local build_args=""
     if [ "${is_rebuild}" != "true" ]; then
@@ -492,8 +503,8 @@ test_build() {
     # Misura build time
     local start_time=$(date +%s.%N)
 
-    # Esegui docker build in background (con o senza cache)
-    docker build ${build_args} -t "${image_name}" -f "${dockerfile}" .. &> "${build_log}" &
+    # Esegui docker build in background (con o senza cache) con BuildKit configurato
+    env ${use_buildkit} docker build ${build_args} -t "${image_name}" -f "${dockerfile}" .. &> "${build_log}" &
     local build_pid=$!
 
     # Monitora energia durante la build con perf in loop
