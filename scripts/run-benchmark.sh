@@ -21,9 +21,14 @@ RESULTS_FILE="${RESULTS_DIR}/results.txt"
 CSV_FILE="${RESULTS_DIR}/results.csv"
 
 # Configurazioni Docker
-#CONFIGS=("fatjar" "layered" "native")
-#CONFIGS=("fatjar" "layered")
-CONFIGS=("layered")
+# Accetta configurazioni da linea di comando, altrimenti usa default
+if [ $# -gt 0 ]; then
+    CONFIGS=("$@")
+else
+    # Default: tutte le configurazioni
+    CONFIGS=("fatjar" "layered" "native")
+fi
+
 IMAGE_PREFIX="tesi-benchmark"
 
 # Parametri test
@@ -43,9 +48,53 @@ APP_URL="http://localhost:8080"
 HEALTH_URL="${APP_URL}/actuator/health"
 API_URL="${APP_URL}/api/users"
 
+# Funzione di help
+show_help() {
+    cat << EOF
+${GREEN}=====================================${NC}
+${GREEN}  Spring Boot Benchmark Suite${NC}
+${GREEN}=====================================${NC}
+
+Uso: $0 [configurazioni...]
+
+Configurazioni disponibili:
+  fatjar   - Fat JAR tradizionale
+  layered  - Layered JAR con cache ottimizzate
+  native   - Native image GraalVM
+
+Esempi:
+  $0                    # Esegue tutte le configurazioni (default)
+  $0 layered            # Esegue solo layered
+  $0 fatjar layered     # Esegue fatjar e layered
+  $0 native             # Esegue solo native
+
+EOF
+    exit 0
+}
+
+# Verifica se è richiesto help
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    show_help
+fi
+
+# Validazione configurazioni
+VALID_CONFIGS=("fatjar" "layered" "native")
+for config in "${CONFIGS[@]}"; do
+    valid_config_string=" ${VALID_CONFIGS[*]} "
+    if [[ ! ${valid_config_string} =~  ${config}  ]]; then
+        echo -e "${RED}Errore: configurazione '${config}' non valida${NC}"
+        echo "Configurazioni valide: ${VALID_CONFIGS[*]}"
+        echo ""
+        echo "Usa '$0 --help' per maggiori informazioni"
+        exit 1
+    fi
+done
+
 echo -e "${GREEN}=====================================${NC}"
 echo -e "${GREEN}  Spring Boot Benchmark Suite${NC}"
 echo -e "${GREEN}=====================================${NC}"
+echo ""
+echo -e "${BLUE}Configurazioni da testare:${NC} ${CONFIGS[*]}"
 echo ""
 
 # Crea directory risultati
@@ -77,6 +126,10 @@ Esecuzione del: $(date)
 Host: $(hostname)
 CPU: $(lscpu | grep "Model name" | cut -d':' -f2 | xargs)
 Kernel: $(uname -r)
+
+## Configurazioni Testate
+
+${CONFIGS[*]}
 
 ## File Generati
 

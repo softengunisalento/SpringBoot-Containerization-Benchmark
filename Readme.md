@@ -46,7 +46,11 @@ Confronto di tre strategie di containerizzazione per applicazioni Spring Boot: c
 
 ### Esegui tutti i test
 ```bash
-./run-benchmark.sh
+./run-benchmark.sh                    # Tutte le configurazioni (default)
+./run-benchmark.sh layered            # Solo layered
+./run-benchmark.sh fatjar layered     # Fat JAR e Layered
+./run-benchmark.sh native             # Solo native
+./run-benchmark.sh --help             # Mostra l'help
 ```
 
 ### Analizza risultati
