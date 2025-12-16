@@ -5,6 +5,7 @@
 # =================================================================
 
 set -e
+export LC_NUMERIC=C
 
 # Colori per output
 RED='\033[0;31m'
@@ -42,6 +43,9 @@ LOAD_TEST_CONNECTIONS=100
 REBUILD_DEP_GROUP_ID="org.apache.commons"
 REBUILD_DEP_ARTIFACT_ID="commons-lang3"
 REBUILD_DEP_VERSION="3.19.0"
+
+# Variabile per baseline energetica
+BASELINE_POWER_W=0
 
 # URL di test
 APP_URL="http://localhost:8080"
@@ -202,6 +206,27 @@ check_dependencies() {
     fi
 
     log_success "Tutte le dipendenze sono disponibili"
+}
+
+# Funzione per misurare baseline energetica
+measure_baseline() {
+    log_section "Misurazione Baseline Energetica (Idle PC)"
+    local duration=10
+    local temp_file="${RESULTS_DIR}/baseline_energy.txt"
+
+    log "Misuro consumo idle del sistema per ${duration}s..."
+    measure_energy "${duration}" "${temp_file}"
+
+    local total_energy=$(extract_total_energy "${temp_file}")
+
+    # Calcola potenza media in Watt
+    BASELINE_POWER_W=$(echo "${total_energy} / ${duration}" | bc -l)
+
+    # Arrotonda a 2 decimali
+    BASELINE_POWER_W=$(printf "%.2f" "${BASELINE_POWER_W}")
+
+    log_success "Baseline calcolata: ${BASELINE_POWER_W} W"
+    log "Questo valore verrà sottratto da tutte le misurazioni energetiche."
 }
 
 # Funzione per misurare energia con perf
@@ -586,11 +611,17 @@ test_build() {
     log_success "Build completata in ${build_time}s"
 
     # Estrai energia totale sommando tutti i sample
-    local energy=$(grep "power/energy-pkg/" "${perf_file}" 2>/dev/null | \
+    local energy_raw=$(grep "power/energy-pkg/" "${perf_file}" 2>/dev/null | \
         awk -F',' '{sum+=$1} END {printf "%.2f", sum}')
-    [ -z "$energy" ] && energy="0"
+    [ -z "$energy_raw" ] && energy_raw="0"
 
-    log "Energia consumata: ${energy} J"
+    # Calcola energia netta sottraendo baseline
+    local baseline_energy=$(echo "${BASELINE_POWER_W} * ${build_time}" | bc -l)
+    local energy=$(echo "${energy_raw} - ${baseline_energy}" | bc -l)
+    if (( $(echo "$energy < 0" | bc -l) )); then energy=0; fi
+    energy=$(printf "%.2f" "${energy}")
+
+    log "Energia consumata: ${energy} J (Netta, Baseline: ${BASELINE_POWER_W} W)"
 
     # Dimensione immagine
     local image_size=$(docker images "${image_name}" --format "{{.Size}}" | head -1)
@@ -682,11 +713,17 @@ test_startup() {
     log "Sample energia raccolti: ${sample_count}"
 
     # Estrai energia totale sommando tutti i sample
-    local energy=$(grep "power/energy-pkg/" "${perf_file}" 2>/dev/null | \
+    local energy_raw=$(grep "power/energy-pkg/" "${perf_file}" 2>/dev/null | \
         awk -F',' '{sum+=$1} END {printf "%.2f", sum}')
-    [ -z "$energy" ] && energy="0"
+    [ -z "$energy_raw" ] && energy_raw="0"
 
-    log "Energia consumata startup: ${energy} J"
+    # Calcola energia netta
+    local baseline_energy=$(echo "${BASELINE_POWER_W} * ${startup_time}" | bc -l)
+    local energy=$(echo "${energy_raw} - ${baseline_energy}" | bc -l)
+    if (( $(echo "$energy < 0" | bc -l) )); then energy=0; fi
+    energy=$(printf "%.2f" "${energy}")
+
+    log "Energia consumata startup: ${energy} J (Netta)"
 
     # Cleanup
     cleanup_container "${container_name}"
@@ -743,7 +780,14 @@ test_idle() {
     wait ${stats_pid} 2>/dev/null || true
 
     # Estrai metriche
-    local energy=$(extract_total_energy "${perf_file}")
+    local energy_raw=$(extract_total_energy "${perf_file}")
+
+    # Calcola energia netta
+    local baseline_energy=$(echo "${BASELINE_POWER_W} * ${IDLE_DURATION}" | bc -l)
+    local energy=$(echo "${energy_raw} - ${baseline_energy}" | bc -l)
+    if (( $(echo "$energy < 0" | bc -l) )); then energy=0; fi
+    energy=$(printf "%.2f" "${energy}")
+
     local avg_stats=$(calculate_stats_avg "${stats_file}")
     local cpu_avg=$(echo "${avg_stats}" | cut -d',' -f1)
     local mem_avg=$(echo "${avg_stats}" | cut -d',' -f2)
@@ -823,9 +867,19 @@ test_load() {
     wait ${stats_pid} 2>/dev/null || true
 
     # Estrai metriche energia
-    local energy_total=$(extract_total_energy "${perf_file}")    # Energia totale in Joules
-    local power_avg=$(extract_avg_energy "${perf_file}")         # Potenza media in Watt (J/s)
+    local energy_total_raw=$(extract_total_energy "${perf_file}")    # Energia totale in Joules
+    local power_avg_raw=$(extract_avg_energy "${perf_file}")         # Potenza media in Watt (J/s)
     local power_peak=$(extract_peak_energy "${perf_file}")       # Potenza di picco in Watt (J/s)
+
+    # Calcola valori netti
+    local baseline_energy=$(echo "${BASELINE_POWER_W} * ${LOAD_TEST_DURATION}" | bc -l)
+    local energy_total=$(echo "${energy_total_raw} - ${baseline_energy}" | bc -l)
+    if (( $(echo "$energy_total < 0" | bc -l) )); then energy_total=0; fi
+    energy_total=$(printf "%.2f" "${energy_total}")
+
+    local power_avg=$(echo "${power_avg_raw} - ${BASELINE_POWER_W}" | bc -l)
+    if (( $(echo "$power_avg < 0" | bc -l) )); then power_avg=0; fi
+    power_avg=$(printf "%.2f" "${power_avg}")
 
     # Estrai metriche CPU/RAM
     local avg_stats=$(calculate_stats_avg "${stats_file}")
@@ -878,6 +932,9 @@ main() {
 
     # Verifica dipendenze
     check_dependencies
+
+    # Misura baseline energetica
+    measure_baseline
 
     # Avvia database PostgreSQL
     start_postgres || {
@@ -932,4 +989,3 @@ main() {
 
 # Esegui main
 main "$@"
-
