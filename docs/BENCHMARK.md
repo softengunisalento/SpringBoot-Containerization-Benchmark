@@ -11,7 +11,7 @@ Script per eseguire test di performance e consumo energetico sulle tre configura
 - ~10 GB spazio disco
 - Tempo stimato: 45-90 minuti
 
-## 🚀 Setup Rapido
+## 🚀 Setup
 
 ### 1. Installa dipendenze
 
@@ -157,51 +157,7 @@ Lo script testa automaticamente tutte e tre le configurazioni:
 2. **layered** (`Dockerfile.layered`): Layered JAR ottimizzato
 3. **native** (`Dockerfile.native`): GraalVM Native Image
 
-## 🔧 Troubleshooting
-
-### Perf non funziona
-
-```bash
-# Verifica supporto energy counters
-ls /sys/devices/power/events/
-
-# Se vuoto, il CPU non supporta RAPL
-# Alternativa: usa solo metriche di tempo e risorse
-```
-
-### Errore permessi perf
-
-```bash
-# Temporaneo
-sudo sysctl -w kernel.perf_event_paranoid=-1
-
-# Permanente
-echo "kernel.perf_event_paranoid = -1" | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
-```
-
-### Docker BuildKit non disponibile
-
-```bash
-# Abilita BuildKit
-export DOCKER_BUILDKIT=1
-export COMPOSE_DOCKER_CLI_BUILD=1
-
-# Oppure usa buildx
-docker buildx create --use
-```
-
-### Porta 8080 già in uso
-
-```bash
-# Trova processo
-sudo lsof -i :8080
-
-# O modifica porta in run-benchmark.sh
-# Cambia -p 8080:8080 in -p 8081:8080
-```
-
-## 📝 Note Importanti
+## 📝 Note
 
 ### Accuratezza misurazioni
 
@@ -217,15 +173,6 @@ Per risultati accurati:
 - **RAPL** misura consumo CPU/package, non sistema totale
 - Risultati sono relativi (confronti tra configurazioni)
 - Precisione dipende dal processore
-
-### Durata esecuzione
-
-Tempo stimato per configurazione:
-- Build iniziale: 2-10 minuti (variabile per native)
-- Rebuild: 30s-5 minuti
-- Startup test: 30s-2 minuti
-- Idle test: 40s (con warmup)
-- Load test: 70s (con warmup)
 
 **Totale per 3 configurazioni: 45-90 minuti**
 
