@@ -10,7 +10,7 @@ FROM ghcr.io/graalvm/native-image-community:21 AS builder
 
 WORKDIR /build
 
-# Installa solo Maven (gli altri tool sono già presenti)
+# Installa Maven
 RUN microdnf install -y maven && microdnf clean all
 
 # Copia solo dipendenze prima (layer caching)
@@ -31,9 +31,15 @@ RUN ls -lh target/ && \
     chmod +x target/application
 
 # Stage 2: Runtime minimale
-FROM oraclelinux:9-slim
+FROM alpine:3.19
 
 WORKDIR /app
+
+# Installa solo glibc compatibility layer per native image
+RUN apk add --no-cache \
+    gcompat \
+    libstdc++ \
+    zlib
 
 # Copia eseguibile nativo
 COPY --from=builder /build/target/application ./application
